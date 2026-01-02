@@ -17,6 +17,12 @@ export class NestScene extends Phaser.Scene {
 
   private craftKey!: Phaser.Input.Keyboard.Key;
   private placeKey!: Phaser.Input.Keyboard.Key;
+  private key1!: Phaser.Input.Keyboard.Key;
+  private key2!: Phaser.Input.Keyboard.Key;
+
+  private exitSelectionText!: Phaser.GameObjects.Text;
+  private isPantryUnlocked = false;
+  private wasUnlockedBefore = false;
 
   constructor() {
     super({ key: 'NestScene' });
@@ -38,6 +44,10 @@ export class NestScene extends Phaser.Scene {
     const saveData = SaveSystem.load();
     this.crumbs = data.crumbs ?? saveData.crumbs;
     this.thread = data.thread ?? saveData.thread;
+
+    // Check if pantry was unlocked before this session
+    this.wasUnlockedBefore = SaveSystem.getPlacements().length >= 2;
+    this.isPantryUnlocked = this.wasUnlockedBefore;
   }
 
   shutdown(): void {
@@ -59,6 +69,8 @@ export class NestScene extends Phaser.Scene {
     if (this.input.keyboard) {
       this.craftKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.C);
       this.placeKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.P);
+      this.key1 = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
+      this.key2 = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
     }
 
     // Background - cozy nest interior
@@ -82,10 +94,20 @@ export class NestScene extends Phaser.Scene {
     this.physics.add.existing(this.exitZone, true);
 
     // Exit label
-    this.add.text(750, 440, 'EXIT [E]', {
+    this.add.text(750, 410, 'EXIT', {
       fontSize: '14px',
       color: '#ffd700',
       fontStyle: 'bold',
+    }).setOrigin(0.5);
+
+    // Exit selection text (to the left of the door)
+    const pantryStatus = this.isPantryUnlocked ? '' : '(Locked)';
+    this.exitSelectionText = this.add.text(650, 480, `1: Kitchen\n2: Pantry ${pantryStatus}`, {
+      fontSize: '12px',
+      color: '#ffdd88',
+      backgroundColor: '#000000',
+      padding: { x: 6, y: 4 },
+      align: 'left',
     }).setOrigin(0.5);
 
     // Create player
@@ -185,18 +207,70 @@ export class NestScene extends Phaser.Scene {
 
     this.player.update();
 
-    // Check exit interaction
-    if (this.player.interactJustPressed) {
-      const exitBody = this.exitZone.body as Phaser.Physics.Arcade.StaticBody;
-      const playerBounds = this.player.getBounds();
-      const exitBounds = new Phaser.Geom.Rectangle(
-        exitBody.x, exitBody.y, exitBody.width, exitBody.height
-      );
+    // Check exit interaction (1 or 2 keys)
+    this.handleExitSelection();
 
-      if (Phaser.Geom.Intersects.RectangleToRectangle(playerBounds, exitBounds)) {
-        const hasBed = SaveSystem.hasPlacedItem('bed');
-        this.scene.start('RoomScene', { crumbs: this.crumbs, thread: this.thread, hasBed });
+    // Check unlock status (in case player just placed an item)
+    this.checkUnlockStatus();
+  }
+
+  private handleExitSelection(): void {
+    const exitBody = this.exitZone.body as Phaser.Physics.Arcade.StaticBody;
+    const playerBounds = this.player.getBounds();
+    const exitBounds = new Phaser.Geom.Rectangle(
+      exitBody.x, exitBody.y, exitBody.width, exitBody.height
+    );
+
+    const nearExit = Phaser.Geom.Intersects.RectangleToRectangle(playerBounds, exitBounds);
+    if (!nearExit) return;
+
+    const hasBed = SaveSystem.hasPlacedItem('bed');
+
+    // Key 1: Go to Kitchen (RoomScene)
+    if (Phaser.Input.Keyboard.JustDown(this.key1)) {
+      this.scene.start('RoomScene', { crumbs: this.crumbs, thread: this.thread, hasBed });
+    }
+
+    // Key 2: Go to Pantry (if unlocked)
+    if (Phaser.Input.Keyboard.JustDown(this.key2)) {
+      if (this.isPantryUnlocked) {
+        this.scene.start('PantryScene', { crumbs: this.crumbs, thread: this.thread, hasBed });
+      } else {
+        this.showToast('Pantry is locked — place 2 items to unlock.');
       }
     }
+  }
+
+  private checkUnlockStatus(): void {
+    const placements = SaveSystem.getPlacements();
+    const nowUnlocked = placements.length >= 2;
+
+    // If just became unlocked, show toast
+    if (nowUnlocked && !this.isPantryUnlocked) {
+      this.isPantryUnlocked = true;
+      this.exitSelectionText.setText('1: Kitchen\n2: Pantry');
+      if (!this.wasUnlockedBefore) {
+        this.showToast('New area unlocked!');
+        this.wasUnlockedBefore = true;
+      }
+    }
+  }
+
+  private showToast(message: string): void {
+    const toast = this.add.text(400, 300, message, {
+      fontSize: '18px',
+      color: '#ffd700',
+      backgroundColor: '#000000',
+      padding: { x: 12, y: 8 },
+    }).setOrigin(0.5).setDepth(200);
+
+    this.tweens.add({
+      targets: toast,
+      alpha: 0,
+      y: toast.y - 30,
+      duration: 1000,
+      delay: 1500,
+      onComplete: () => toast.destroy(),
+    });
   }
 }

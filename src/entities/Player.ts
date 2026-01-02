@@ -9,7 +9,11 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   private readonly WALK_SPEED = 200;
   private readonly SNEAK_SPEED = 80;
-  private readonly JUMP_VELOCITY = -400;
+  private readonly JUMP_VELOCITY = -420;
+  private readonly COYOTE_TIME = 150; // ms of grace period after leaving platform
+
+  private coyoteTimer = 0;
+  private wasOnFloor = false;
 
   public isHidden = false;
   public interactJustPressed = false;
@@ -66,11 +70,24 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     }
   }
 
-  update(): void {
+  update(delta: number = 16): void {
     if (!this.body) return;
 
     const body = this.body as Phaser.Physics.Arcade.Body;
     const onFloor = body.blocked.down || body.touching.down;
+
+    // Coyote time tracking
+    if (onFloor) {
+      this.coyoteTimer = this.COYOTE_TIME;
+      this.wasOnFloor = true;
+    } else if (this.wasOnFloor) {
+      this.coyoteTimer -= delta;
+      if (this.coyoteTimer <= 0) {
+        this.wasOnFloor = false;
+      }
+    }
+
+    const canJump = onFloor || this.coyoteTimer > 0;
 
     // Check sneak
     const isSneaking = this.shiftKey.isDown;
@@ -90,10 +107,14 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       this.setVelocityX(0);
     }
 
-    // Jump
-    const jumpPressed = this.cursors.up.isDown || this.wasd.W.isDown || this.spaceKey.isDown;
-    if (jumpPressed && onFloor) {
+    // Jump (with coyote time)
+    const jumpPressed = Phaser.Input.Keyboard.JustDown(this.cursors.up) ||
+                        Phaser.Input.Keyboard.JustDown(this.wasd.W) ||
+                        Phaser.Input.Keyboard.JustDown(this.spaceKey);
+    if (jumpPressed && canJump) {
       this.setVelocityY(this.JUMP_VELOCITY);
+      this.coyoteTimer = 0; // Consume coyote time
+      this.wasOnFloor = false;
     }
 
     // Interact (E key) - track just pressed

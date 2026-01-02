@@ -51,6 +51,7 @@ const PATROL_ROUTES = [
 ];
 
 export class Cat extends Phaser.Physics.Arcade.Sprite {
+  private patrolRoutes: { x: number; y: number }[][] = PATROL_ROUTES;
   private waypoints: Phaser.Math.Vector2[] = [];
   private currentWaypointIndex = 0;
   private waypointDirection = 1; // 1 = forward, -1 = backward
@@ -137,10 +138,16 @@ export class Cat extends Phaser.Physics.Arcade.Sprite {
     this.choosePatrolRoute();
   }
 
+  // Set custom patrol routes (for different rooms)
+  setPatrolRoutes(routes: { x: number; y: number }[][]): void {
+    this.patrolRoutes = routes;
+    this.choosePatrolRoute();
+  }
+
   // Choose a random patrol route for this trip
   choosePatrolRoute(): void {
-    const routeIndex = Math.floor(Math.random() * PATROL_ROUTES.length);
-    const route = PATROL_ROUTES[routeIndex];
+    const routeIndex = Math.floor(Math.random() * this.patrolRoutes.length);
+    const route = this.patrolRoutes[routeIndex];
     this.waypoints = route.map(p => new Phaser.Math.Vector2(p.x, p.y));
 
     // Start at a random waypoint in the route

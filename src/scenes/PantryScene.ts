@@ -7,34 +7,79 @@ import { HidingZone } from '../entities/HidingZone';
 import { HUD } from '../ui/HUD';
 import { SaveSystem } from '../systems/SaveSystem';
 
-// Fixed spawn positions
-const PLAYER_SPAWN = { x: 80, y: 500 };
-const CAT_SPAWN = { x: 400, y: 540 };
+// Fixed spawn positions for Pantry
+const PLAYER_SPAWN = { x: 750, y: 500 };
+const CAT_SPAWN = { x: 300, y: 540 };
 const CRUMB_POSITIONS = [
-  { x: 150, y: 550 },
-  { x: 250, y: 550 },
-  { x: 350, y: 550 },
-  { x: 450, y: 550 },
-  { x: 550, y: 550 },
-  { x: 650, y: 550 },
-  { x: 200, y: 430 },
-  { x: 500, y: 360 },
+  // Floor level
+  { x: 100, y: 550 },
+  { x: 300, y: 550 },
+  { x: 500, y: 550 },
+  // Lower platforms
+  { x: 120, y: 470 },
+  { x: 650, y: 470 },
+  // Mid platforms
+  { x: 250, y: 390 },
+  { x: 550, y: 390 },
+  // Upper platforms
+  { x: 400, y: 310 },
+  { x: 150, y: 230 },
+  // Top shelf
+  { x: 600, y: 150 },
 ];
 const THREAD_POSITIONS = [
-  { x: 700, y: 460 },
-  { x: 130, y: 430 },
-  { x: 580, y: 360 },
-  { x: 300, y: 550 },
+  // Lower level
+  { x: 180, y: 470 },
+  // Mid level
+  { x: 450, y: 390 },
+  // Upper level
+  { x: 300, y: 310 },
+  // Top shelf (reward)
+  { x: 550, y: 150 },
+  { x: 650, y: 150 },
 ];
 
-// Risky bonus spawn positions (near cat patrol routes, exposed areas)
+// Risky bonus spawn positions (near cat routes, exposed on floor)
 const RISKY_POSITIONS = [
-  { x: 400, y: 550 },  // Center of floor - cat patrol hotspot
-  { x: 550, y: 550 },  // Right side floor - exposed
-  { x: 350, y: 360 },  // Mid platform - visible from below
+  { x: 350, y: 550 },  // Center floor - cat patrol area
+  { x: 550, y: 550 },  // Right floor - exposed
+  { x: 300, y: 400 },  // Mid platform - visible from below
 ];
 
-export class RoomScene extends Phaser.Scene {
+// Pantry-specific patrol routes (different from kitchen)
+const PANTRY_PATROL_ROUTES = [
+  // Route 1: Left side focus
+  [
+    { x: 100, y: 540 },
+    { x: 250, y: 540 },
+    { x: 400, y: 540 },
+    { x: 200, y: 540 },
+  ],
+  // Route 2: Center patrol
+  [
+    { x: 200, y: 540 },
+    { x: 400, y: 540 },
+    { x: 550, y: 540 },
+    { x: 350, y: 540 },
+  ],
+  // Route 3: Wide sweep
+  [
+    { x: 100, y: 540 },
+    { x: 350, y: 540 },
+    { x: 600, y: 540 },
+    { x: 400, y: 540 },
+    { x: 150, y: 540 },
+  ],
+  // Route 4: Right side focus
+  [
+    { x: 400, y: 540 },
+    { x: 550, y: 540 },
+    { x: 700, y: 540 },
+    { x: 500, y: 540 },
+  ],
+];
+
+export class PantryScene extends Phaser.Scene {
   private player!: Player;
   private cat!: Cat;
   private hud!: HUD;
@@ -65,19 +110,16 @@ export class RoomScene extends Phaser.Scene {
   private bonusSpawns: Phaser.GameObjects.GameObject[] = [];
 
   constructor() {
-    super({ key: 'RoomScene' });
+    super({ key: 'PantryScene' });
   }
 
   init(data: { crumbs?: number; thread?: number; hasBed?: boolean }): void {
-    // Load resource counts from data or localStorage
     const saveData = SaveSystem.load();
     this.crumbCount = data.crumbs ?? saveData.crumbs;
     this.threadCount = data.thread ?? saveData.thread;
-
-    // Check for bed rest bonus
     this.hasBed = data.hasBed ?? false;
 
-    // Reset all state for fresh trip
+    // Reset state
     this.isShowingCaught = false;
     this.isInvincible = false;
     this.currentHidingZone = null;
@@ -90,12 +132,10 @@ export class RoomScene extends Phaser.Scene {
   }
 
   shutdown(): void {
-    // Clean up ALL input keys to prevent accumulation
     if (this.input.keyboard) {
       this.input.keyboard.removeAllKeys(true);
     }
 
-    // Clean up sweep timers
     if (this.sweepTimer) {
       this.sweepTimer.remove();
       this.sweepTimer = null;
@@ -105,7 +145,6 @@ export class RoomScene extends Phaser.Scene {
       this.sweepWarningTimer = null;
     }
 
-    // Clean up physics groups
     if (this.crumbs) {
       this.crumbs.clear(true, true);
       this.crumbs = null;
@@ -121,36 +160,50 @@ export class RoomScene extends Phaser.Scene {
       this.platforms.clear(true, true);
     }
     this.hidingZones = [];
-
-    // Clean up bonus spawns
     this.bonusSpawns.forEach(spawn => spawn.destroy());
     this.bonusSpawns = [];
   }
 
   create(): void {
-    // Background - kitchen/room
-    this.add.rectangle(400, 300, 800, 600, 0x2d2d44);
+    // Background - darker pantry color
+    this.add.rectangle(400, 300, 800, 600, 0x1e1e2e);
 
-    // Floor tiles pattern
+    // Floor pattern - wooden planks style
     this.createFloorPattern();
 
     // Create floor
     this.floor = this.physics.add.staticGroup();
-    const floorRect = this.add.rectangle(400, 580, 800, 40, 0x4a4a6a);
+    const floorRect = this.add.rectangle(400, 580, 800, 40, 0x3a3a4a);
     this.floor.add(floorRect);
 
-    // Create platforms
+    // Create platforms - vertical progression (80px jumps are comfortable)
     this.platforms = this.physics.add.staticGroup();
-    this.createPlatform(200, 450, 150, 20);
-    this.createPlatform(500, 380, 180, 20);
-    this.createPlatform(700, 480, 120, 20);
 
-    // Create nest entrance
-    this.nestEntrance = this.add.rectangle(50, 520, 60, 100, 0x3d2817, 0.9);
+    // Lower tier (y=480) - easy to reach from floor
+    this.createPlatform(120, 480, 120, 16, 'Crate');
+    this.createPlatform(650, 480, 100, 16, 'Box');
+
+    // Mid tier (y=400) - reachable from lower
+    this.createPlatform(280, 400, 140, 16, 'Shelf');
+    this.createPlatform(520, 400, 120, 16, 'Shelf');
+
+    // Upper tier (y=320) - reachable from mid
+    this.createPlatform(400, 320, 160, 16, 'Cupboard');
+    this.createPlatform(150, 320, 100, 16, 'Cabinet');
+
+    // High tier (y=240) - reachable from upper
+    this.createPlatform(280, 240, 120, 16, 'Top Shelf');
+    this.createPlatform(550, 240, 140, 16, 'Top Shelf');
+
+    // Top shelf (y=160) - highest reward area
+    this.createPlatform(600, 160, 180, 16, 'Pantry Top');
+
+    // Create nest entrance (right side for this room)
+    this.nestEntrance = this.add.rectangle(750, 520, 60, 100, 0x3d2817, 0.9);
     this.nestEntrance.setStrokeStyle(3, 0x8b7355);
     this.physics.add.existing(this.nestEntrance, true);
 
-    this.add.text(50, 460, 'NEST [E]', {
+    this.add.text(750, 460, 'NEST [E]', {
       fontSize: '12px',
       color: '#8b7355',
       fontStyle: 'bold',
@@ -159,17 +212,23 @@ export class RoomScene extends Phaser.Scene {
     // Create hiding zones
     this.createHidingZones();
 
-    // Spawn pickups (fresh each trip)
+    // Spawn pickups
     this.spawnCrumbs();
     this.spawnThreads();
     this.spawnBonusPickup();
 
-    // Create and reset player
+    // Create player
     this.player = new Player(this, PLAYER_SPAWN.x, PLAYER_SPAWN.y);
     this.resetPlayer();
 
-    // Create and reset cat
+    // Setup camera to follow player vertically
+    this.cameras.main.startFollow(this.player, true, 0.1, 0.1);
+    this.cameras.main.setDeadzone(400, 150); // Wide horizontal, narrow vertical deadzone
+    this.cameras.main.setBounds(0, 0, 800, 600);
+
+    // Create cat with pantry-specific routes
     this.cat = new Cat(this, CAT_SPAWN.x, CAT_SPAWN.y);
+    this.cat.setPatrolRoutes(PANTRY_PATROL_ROUTES);
     this.resetCat();
 
     // Setup collisions
@@ -177,7 +236,7 @@ export class RoomScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.platforms);
     this.physics.add.collider(this.cat, this.floor);
 
-    // Crumb collection overlap
+    // Crumb collection
     if (this.crumbs) {
       this.physics.add.overlap(
         this.player,
@@ -191,7 +250,7 @@ export class RoomScene extends Phaser.Scene {
       );
     }
 
-    // Thread collection overlap
+    // Thread collection
     if (this.threads) {
       this.physics.add.overlap(
         this.player,
@@ -205,7 +264,7 @@ export class RoomScene extends Phaser.Scene {
       );
     }
 
-    // Cat catches player overlap
+    // Cat collision
     this.physics.add.overlap(
       this.player,
       this.cat,
@@ -213,7 +272,7 @@ export class RoomScene extends Phaser.Scene {
     );
 
     // Create HUD
-    this.hud = new HUD(this, 'THE ROOM (Danger!)');
+    this.hud = new HUD(this, 'THE PANTRY (Danger!)');
     this.hud.updateCrumbs(this.crumbCount);
     this.hud.updateThread(this.threadCount);
     this.hud.showCatState(true);
@@ -224,22 +283,15 @@ export class RoomScene extends Phaser.Scene {
     // Show trip started toast
     this.showTripStartedToast();
 
-    // Schedule first human footsteps sweep
+    // Schedule sweeps
     this.scheduleNextSweep();
   }
 
-  // ============ Helper Methods ============
-
   private spawnCrumbs(): void {
-    // Clear existing crumbs if any
     if (this.crumbs) {
       this.crumbs.clear(true, true);
     }
-
-    // Create fresh crumb group
     this.crumbs = this.physics.add.staticGroup();
-
-    // Spawn crumbs at fixed positions
     CRUMB_POSITIONS.forEach(pos => {
       const crumb = new Crumb(this, pos.x, pos.y);
       this.add.existing(crumb);
@@ -248,15 +300,10 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private spawnThreads(): void {
-    // Clear existing threads if any
     if (this.threads) {
       this.threads.clear(true, true);
     }
-
-    // Create fresh thread group
     this.threads = this.physics.add.staticGroup();
-
-    // Spawn threads at fixed positions
     THREAD_POSITIONS.forEach(pos => {
       const thread = new Thread(this, pos.x, pos.y);
       this.add.existing(thread);
@@ -265,14 +312,14 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private spawnBonusPickup(): void {
-    // Clean up any existing bonus spawns
+    // Clear any existing bonus spawns
     this.bonusSpawns.forEach(spawn => spawn.destroy());
     this.bonusSpawns = [];
 
     // Pick a random risky position
     const pos = RISKY_POSITIONS[Math.floor(Math.random() * RISKY_POSITIONS.length)];
 
-    // 50/50 chance: cluster of crumbs OR single thread
+    // 50/50 chance: thread or crumbs
     const isThreadBonus = Math.random() < 0.5;
 
     if (isThreadBonus) {
@@ -280,18 +327,18 @@ export class RoomScene extends Phaser.Scene {
       const thread = new Thread(this, pos.x, pos.y);
       this.add.existing(thread);
       this.threads!.add(thread);
-      thread.setTint(0xffccff); // Brighter pink tint
+      thread.setTint(0xffccff); // Pink tint for bonus
       this.addBonusPulse(thread);
       this.bonusSpawns.push(thread);
     } else {
-      // Spawn 2-3 bonus crumbs in a small cluster
+      // Spawn 2-3 bonus crumbs
       const count = Phaser.Math.Between(2, 3);
       for (let i = 0; i < count; i++) {
-        const offsetX = (i - 1) * 20; // Spread horizontally
+        const offsetX = (i - 1) * 20;
         const crumb = new Crumb(this, pos.x + offsetX, pos.y);
         this.add.existing(crumb);
         this.crumbs!.add(crumb);
-        crumb.setTint(0xffff88); // Brighter golden tint
+        crumb.setTint(0xffff88); // Yellow tint for bonus
         this.addBonusPulse(crumb);
         this.bonusSpawns.push(crumb);
       }
@@ -325,7 +372,7 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private showTripStartedToast(): void {
-    const toast = this.add.text(400, 100, 'Trip started!', {
+    const toast = this.add.text(400, 100, 'Entered the Pantry!', {
       fontSize: '24px',
       color: '#00ff00',
       backgroundColor: '#000000',
@@ -341,7 +388,6 @@ export class RoomScene extends Phaser.Scene {
       onComplete: () => toast.destroy(),
     });
 
-    // Show bed rest bonus toast if applicable
     if (this.hasBed) {
       this.showRestBonusToast();
     }
@@ -365,37 +411,62 @@ export class RoomScene extends Phaser.Scene {
     });
   }
 
-  // ============ Scene Setup Methods ============
-
   private createFloorPattern(): void {
     const graphics = this.add.graphics();
-    graphics.lineStyle(1, 0x3a3a5a, 0.5);
-    for (let x = 0; x < 800; x += 50) {
-      graphics.lineBetween(x, 560, x, 600);
-    }
-    for (let y = 560; y < 600; y += 25) {
+    graphics.lineStyle(1, 0x2a2a3a, 0.5);
+    // Horizontal wood plank lines
+    for (let y = 560; y < 600; y += 10) {
       graphics.lineBetween(0, y, 800, y);
+    }
+    // Vertical separators
+    for (let x = 0; x < 800; x += 80) {
+      graphics.lineBetween(x, 560, x, 600);
     }
   }
 
-  private createPlatform(x: number, y: number, width: number, height: number): void {
-    const platform = this.add.rectangle(x, y, width, height, 0x5a5a7a);
-    platform.setStrokeStyle(2, 0x6a6a8a);
+  private createPlatform(x: number, y: number, width: number, height: number, label?: string): void {
+    const platform = this.add.rectangle(x, y, width, height, 0x5a4a3a);
+    platform.setStrokeStyle(2, 0x6a5a4a);
     this.platforms.add(platform);
+
+    // Add shelf bracket visuals (only for platforms not at very top)
+    if (y > 200) {
+      const bracketLeft = this.add.rectangle(x - width/2 + 8, y + 12, 6, 16, 0x4a3a2a);
+      const bracketRight = this.add.rectangle(x + width/2 - 8, y + 12, 6, 16, 0x4a3a2a);
+      bracketLeft.setStrokeStyle(1, 0x5a4a3a);
+      bracketRight.setStrokeStyle(1, 0x5a4a3a);
+    }
+
+    // Optional label
+    if (label) {
+      this.add.text(x, y - 12, label, {
+        fontSize: '8px',
+        color: '#666666',
+      }).setOrigin(0.5);
+    }
   }
 
   private createHidingZones(): void {
-    const zone1 = new HidingZone(this, 300, 530, 80, 60);
-    const zone2 = new HidingZone(this, 600, 530, 80, 60);
+    // Hiding zone 1: Floor level - cardboard box
+    const zone1 = new HidingZone(this, 200, 530, 80, 60);
+    // Hiding zone 2: Floor level - crate
+    const zone2 = new HidingZone(this, 450, 530, 90, 60);
+    // Hiding zone 3: Upper platform - jar/container
+    const zone3 = new HidingZone(this, 400, 290, 60, 40);
 
-    this.hidingZones = [zone1, zone2];
+    this.hidingZones = [zone1, zone2, zone3];
 
-    // Furniture visuals
-    this.add.rectangle(300, 490, 100, 20, 0x5c4033).setStrokeStyle(2, 0x3d2817);
-    this.add.rectangle(600, 490, 100, 20, 0x5c4033).setStrokeStyle(2, 0x3d2817);
+    // Box visual (floor)
+    this.add.rectangle(200, 510, 70, 50, 0x8b6914).setStrokeStyle(2, 0x6b4914);
+    this.add.text(200, 480, 'Box', { fontSize: '10px', color: '#888888' }).setOrigin(0.5);
 
-    this.add.text(300, 470, 'Table', { fontSize: '10px', color: '#888888' }).setOrigin(0.5);
-    this.add.text(600, 470, 'Chair', { fontSize: '10px', color: '#888888' }).setOrigin(0.5);
+    // Crate visual (floor)
+    this.add.rectangle(450, 510, 80, 50, 0x5c4033).setStrokeStyle(2, 0x3d2817);
+    this.add.text(450, 480, 'Crate', { fontSize: '10px', color: '#888888' }).setOrigin(0.5);
+
+    // Jar visual (upper platform at y=320)
+    this.add.rectangle(400, 300, 40, 35, 0x4a6a8a).setStrokeStyle(2, 0x3a5a7a);
+    this.add.text(400, 275, 'Jar', { fontSize: '10px', color: '#888888' }).setOrigin(0.5);
   }
 
   private createCaughtOverlay(): void {
@@ -418,12 +489,9 @@ export class RoomScene extends Phaser.Scene {
     this.caughtOverlay.setVisible(false);
   }
 
-  // ============ Game Logic ============
-
   private handleCatCollision(): void {
     if (this.isShowingCaught || this.player.isHidden || this.isInvincible) return;
     if (this.cat.state !== 'chase') return;
-
     this.showCaughtSequence();
   }
 
@@ -432,28 +500,23 @@ export class RoomScene extends Phaser.Scene {
     this.player.setVelocity(0, 0);
     this.player.setActive(false);
 
-    // Update subtext based on bed rest bonus
     const lossText = this.hasBed ? 'Lost 25% of crumbs (bed bonus!)' : 'Lost half your crumbs!';
     this.caughtSubtext?.setText(lossText);
     this.caughtOverlay?.setVisible(true);
 
-    // Lose crumbs: 25% if bed rest bonus, otherwise 50%
     const lossRate = this.hasBed ? 0.25 : 0.5;
     const lostCrumbs = Math.floor(this.crumbCount * lossRate);
     this.crumbCount -= lostCrumbs;
     SaveSystem.save({ crumbs: this.crumbCount, thread: this.threadCount });
 
-    // Reset after delay
     this.time.delayedCall(2000, () => {
       this.caughtOverlay?.setVisible(false);
       this.isShowingCaught = false;
 
-      // Reset player and cat
       this.resetPlayer();
-      this.cat.setPosition(600, 540); // Move cat away
+      this.cat.setPosition(200, 540);
       this.cat.state = 'patrol';
 
-      // Brief invincibility
       this.isInvincible = true;
       this.player.setAlpha(0.5);
       this.time.delayedCall(2000, () => {
@@ -468,7 +531,7 @@ export class RoomScene extends Phaser.Scene {
   update(_time: number, delta: number): void {
     if (this.isShowingCaught) return;
 
-    this.player.update();
+    this.player.update(delta);
     this.cat.update(this.player, delta);
 
     this.hud.updateCatState(this.cat.getStateDisplay());
@@ -529,13 +592,10 @@ export class RoomScene extends Phaser.Scene {
     }
   }
 
-  // ============ Human Footsteps Sweep Hazard ============
-
+  // Human footsteps sweep hazard
   private scheduleNextSweep(): void {
-    // Random delay between 20-35 seconds
     const delay = Phaser.Math.Between(20000, 35000);
 
-    // Clear any existing timer
     if (this.sweepTimer) {
       this.sweepTimer.remove();
     }
@@ -546,10 +606,8 @@ export class RoomScene extends Phaser.Scene {
   }
 
   private triggerSweepWarning(): void {
-    // Show warning 1.5 seconds before sweep
     this.cameras.main.shake(200, 0.003);
 
-    // Create warning text
     this.sweepWarningText = this.add.text(400, 80, 'THUMP... THUMP...', {
       fontSize: '28px',
       color: '#ff4444',
@@ -558,11 +616,9 @@ export class RoomScene extends Phaser.Scene {
       padding: { x: 16, y: 8 },
     }).setOrigin(0.5).setDepth(250);
 
-    // Flash the floor red
     const floorWarning = this.add.rectangle(400, 560, 800, 60, 0xff0000, 0.3);
     floorWarning.setDepth(50);
 
-    // Pulsing animation
     this.tweens.add({
       targets: [floorWarning, this.sweepWarningText],
       alpha: 0.5,
@@ -571,7 +627,6 @@ export class RoomScene extends Phaser.Scene {
       repeat: 3,
     });
 
-    // Schedule the actual sweep after 1.5 seconds
     this.sweepWarningTimer = this.time.delayedCall(1500, () => {
       floorWarning.destroy();
       this.sweepWarningText?.destroy();
@@ -582,14 +637,11 @@ export class RoomScene extends Phaser.Scene {
   private triggerSweep(): void {
     this.isSweepActive = true;
 
-    // Create danger zone along the floor
     this.sweepDangerZone = this.add.rectangle(400, 550, 800, 80, 0xff0000, 0.4);
     this.sweepDangerZone.setDepth(55);
 
-    // Stronger screen shake
     this.cameras.main.shake(300, 0.008);
 
-    // Show "FOOTSTEPS!" text
     const sweepText = this.add.text(400, 300, 'FOOTSTEPS!', {
       fontSize: '36px',
       color: '#ff0000',
@@ -598,7 +650,6 @@ export class RoomScene extends Phaser.Scene {
       padding: { x: 20, y: 10 },
     }).setOrigin(0.5).setDepth(260);
 
-    // Fade out sweep text
     this.tweens.add({
       targets: sweepText,
       alpha: 0,
@@ -607,38 +658,31 @@ export class RoomScene extends Phaser.Scene {
       onComplete: () => sweepText.destroy(),
     });
 
-    // Check for player hit during sweep (1 second duration)
     const sweepCheckInterval = this.time.addEvent({
       delay: 50,
-      repeat: 19, // 20 checks over 1 second
+      repeat: 19,
       callback: () => {
         this.checkSweepHit();
       },
     });
 
-    // End sweep after 1 second
     this.time.delayedCall(1000, () => {
       this.isSweepActive = false;
       this.sweepDangerZone?.destroy();
       this.sweepDangerZone = null;
       sweepCheckInterval.remove();
-
-      // Schedule next sweep
       this.scheduleNextSweep();
     });
   }
 
   private checkSweepHit(): void {
     if (!this.isSweepActive || this.isShowingCaught || this.isInvincible) return;
-    if (this.player.isHidden) return; // Safe if hidden
+    if (this.player.isHidden) return;
 
-    // Check if player is in the danger zone (floor level)
     const playerY = this.player.y;
     const playerX = this.player.x;
 
-    // Danger zone is roughly y: 510-590 (floor area)
     if (playerY >= 500 && playerY <= 600 && playerX >= 0 && playerX <= 800) {
-      // Player caught by footsteps!
       this.showCaughtSequence();
     }
   }

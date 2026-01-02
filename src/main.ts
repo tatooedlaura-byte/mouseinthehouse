@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { NestScene } from './scenes/NestScene';
 import { RoomScene } from './scenes/RoomScene';
+import { PantryScene } from './scenes/PantryScene';
 
 const config: Phaser.Types.Core.GameConfig = {
   type: Phaser.AUTO,
@@ -16,7 +17,7 @@ const config: Phaser.Types.Core.GameConfig = {
       debug: false,
     },
   },
-  scene: [NestScene, RoomScene],
+  scene: [NestScene, RoomScene, PantryScene],
 };
 
 new Phaser.Game(config);
